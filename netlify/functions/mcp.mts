@@ -9,7 +9,7 @@ import { dispatchJob } from '../lib/dispatch';
 function json(data: unknown) { return { content: [{ type: 'text' as const, text: JSON.stringify(data) }], structuredContent: data as Record<string, unknown> }; }
 
 function createServer(owner: string, origin: string, markAudited: () => void) {
-  const server = new McpServer({ name: 'ad-localizer', version: '3.6.0' });
+  const server = new McpServer({ name: 'ad-localizer', version: '3.7.0' });
   const wrap = <A extends Record<string, unknown>>(name: string, fn: (args: A) => Promise<unknown>) => async (args: A) => {
     try {
       const value = await fn(args);
@@ -40,7 +40,7 @@ function createServer(owner: string, origin: string, markAudited: () => void) {
   server.registerTool('start_localization', {
     description: 'Queue a localization job; returns job_id immediately. Finished Ad Creator PRO jobs can be used by ID.',
     inputSchema: {
-      image_urls: z.array(z.string()).optional(), ad_creator_job_id: z.string().optional(),
+      image_urls: z.array(z.string()).optional(), ad_creator_job_id: z.string().optional(), image_ids: z.array(z.string()).optional(),
       target_languages: z.array(z.string()), notes: z.string().optional(), keep_layout: z.boolean().optional(),
       model: z.enum(['gemini','chatgpt','grok']).optional(), resolution: z.string().optional(),
       aspect_ratio: z.string().optional(), strict_text_check: z.boolean().optional(), idempotency_key: z.string().optional(),

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import JSZip from 'jszip';
 import { assetStore, getAsset, imageFromUrl, jobsStore, ownedPath, saveAsset, signedUrl, stateStore, storeImage, updateJSON, validateUrl } from './core';
+import { adCreatorSources } from './ad-creator';
 import { COUNTRIES, ASPECT_RATIOS } from '../../src/options';
 import { IMAGE_MODELS, uploadImage, translateAd, createTask, pollTask, buildRenderPrompt, fetchResultBlob, verifyRenderedText } from '../../src/kie';
 import { applyCanonicalMemory, type FinalSegment, type TranslationMemoryEntry, type GlossaryStore } from '../../src/localization';
@@ -28,33 +29,17 @@ export const options = () => ({
   default_model:'gemini', aspect_ratios:ASPECT_RATIOS.map(({value}) => value), default_aspect_ratio:'4:5',
   resolution:{gemini:['2K'],chatgpt:['provider-default'],grok:['provider-default']}, default_resolution:'2K',
   keep_layout:{supported:[true],default:true}, strict_text_check:{default:false}, image_formats:['png','jpg','webp'],
-  ad_creator_job_id:{requires_adapter:true},
+  ad_creator_job_id:{requires_adapter:false},
 });
 export function sourceUrls(value: unknown, field = 'image_urls'): string[] {
   if (!Array.isArray(value) || !value.length || value.length > 20 || value.some((u) => typeof u !== 'string' || !u.trim())) throw new Error(`${field}: expected 1 to 20 nonempty URL strings`);
   return value.map(String);
 }
-export async function adCreatorSources(jobId: string): Promise<string[]> {
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(jobId)) throw new Error('ad_creator_job_id: invalid ID');
-  // The Ad Creator PRO job schema and API were not supplied. Require an explicit
-  // adapter endpoint instead of guessing Firestore fields or silently failing.
-  const endpoint = process.env.AD_CREATOR_JOB_API;
-  const token = process.env.AD_CREATOR_API_TOKEN;
-  if (!endpoint || !token) throw new Error('ad_creator_job_id: Ad Creator PRO connection is not configured; pass image_urls instead');
-  const base = validateUrl(endpoint, 'AD_CREATOR_JOB_API');
-  const response = await fetch(new URL(encodeURIComponent(jobId), base.toString().replace(/\/?$/, '/')), {
-    headers:{Authorization:`Bearer ${token}`}, signal:AbortSignal.timeout(15000), redirect:'error',
-  });
-  if (!response.ok) throw new Error(`ad_creator_job_id: Ad Creator PRO returned HTTP ${response.status}`);
-  const data = await response.json();
-  if (!['done','completed','success','succeeded'].includes(String(data.status || data.state).toLowerCase())) throw new Error('ad_creator_job_id: job is not finished');
-  const images = data.image_urls || data.output_urls || data.images || data.results || data.outputs;
-  return sourceUrls(Array.isArray(images) ? images.map((x) => typeof x === 'string' ? x : x?.url || x?.image_url || x?.imageUrl || x?.output_url) : [], 'ad_creator_job_id.images');
-}
 export async function createJob(owner:string,args:Record<string,unknown>,startWorker:(id:string)=>Promise<void>):Promise<string> {
   const hasUrls = args.image_urls !== undefined, hasCreator = args.ad_creator_job_id !== undefined;
   if (hasUrls === hasCreator) throw new Error('image_urls/ad_creator_job_id: provide exactly one source');
-  const urls = hasUrls ? sourceUrls(args.image_urls) : await adCreatorSources(String(args.ad_creator_job_id));
+  if (args.image_ids !== undefined && !hasCreator) throw new Error('image_ids: requires ad_creator_job_id');
+  const urls = hasUrls ? sourceUrls(args.image_urls) : await adCreatorSources(String(args.ad_creator_job_id), args.image_ids as string[] | undefined);
   urls.forEach((url,index) => validateUrl(url,`image_urls[${index}]`));
   const languages = args.target_languages;
   if (!Array.isArray(languages) || !languages.length || languages.some((v) => typeof v !== 'string' || !COUNTRIES.includes(v))) throw new Error('target_languages: use market codes returned by list_languages');
@@ -73,7 +58,8 @@ export async function createJob(owner:string,args:Record<string,unknown>,startWo
   const id = idempotency ? createHash('sha256').update(`${owner}:${idempotency}`).digest('hex').slice(0,32) : randomUUID();
   const sources = urls.map((url) => ({url,...(ownedPath(url,owner) ? {path:ownedPath(url,owner)!} : {})}));
   const strictTextCheck = args.strict_text_check === true;
-  const fingerprint = createHash('sha256').update(JSON.stringify({sources,languages,notes,model,resolution,aspectRatio,strictTextCheck})).digest('hex');
+  const sourceIdentity = hasCreator ? {ad_creator_job_id:args.ad_creator_job_id,image_ids:args.image_ids ?? null} : sources;
+  const fingerprint = createHash('sha256').update(JSON.stringify({sourceIdentity,languages,notes,model,resolution,aspectRatio,strictTextCheck})).digest('hex');
   const existing = await read(id);
   if (existing) {
     if (existing.owner !== owner || existing.fingerprint !== fingerprint) throw new Error('idempotency_key: already used for a different request');
