@@ -6,9 +6,11 @@ import { audit, enforceRate, env, imageFromBase64, imageFromUrl, isAuthorized, s
 import { createJob, languageOptions, listJobs, options, publicJob, zipJob } from '../lib/jobs';
 import { dispatchJob } from '../lib/dispatch';
 
+import { botOwner, generate, generationStatus } from '../lib/bot';
+
 function json(data: unknown) { return { content: [{ type: 'text' as const, text: JSON.stringify(data) }], structuredContent: data as Record<string, unknown> }; }
 
-function createServer(owner: string, origin: string, markAudited: () => void) {
+function createServer(owner: string, origin: string, markAudited: () => void, bot: boolean) {
   const server = new McpServer({ name: 'ad-localizer', version: '3.7.0' });
   const wrap = <A extends Record<string, unknown>>(name: string, fn: (args: A) => Promise<unknown>) => async (args: A) => {
     try {
@@ -47,8 +49,10 @@ function createServer(owner: string, origin: string, markAudited: () => void) {
     },
   }, wrap('start_localization', async (args) => ({ job_id: await createJob(owner, args, (id) => dispatchJob(id, origin)), status: 'queued' })));
 
+  if (bot) server.registerTool('generate_image', { description: 'Generate a new square image from a prompt. Poll get_job for result URLs.', inputSchema: { prompt: z.string().min(1) } },
+    wrap('generate_image', async ({ prompt }) => generate(owner, String(prompt))));
   server.registerTool('get_job', { description: 'Fetch job status, progress, errors and available image URLs.', inputSchema: { job_id: z.string() } },
-    wrap('get_job', async ({ job_id }) => publicJob(owner, String(job_id))));
+    wrap('get_job', async ({ job_id }) => bot && String(job_id).startsWith('gen_') ? generationStatus(owner, String(job_id)) : publicJob(owner, String(job_id))));
   server.registerTool('list_jobs', {
     description: 'List your recent jobs, optionally filtered by status or language.',
     inputSchema: { status: z.string().optional(), language: z.string().optional(), limit: z.number().int().optional() },
@@ -61,16 +65,18 @@ function createServer(owner: string, origin: string, markAudited: () => void) {
 }
 
 export default async (request: Request) => {
-  if (!isAuthorized(request.headers.get('authorization'), env('ADLOCALIZER_MCP_TOKEN'))) {
+  const admin = isAuthorized(request.headers.get('authorization'), env('ADLOCALIZER_MCP_TOKEN'));
+  const bot = admin ? null : await botOwner(request.headers.get('authorization'));
+  if (!admin && !bot) {
     return new Response('Unauthorized', { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } });
   }
   const origin = request.headers.get('origin');
   if (origin && origin !== new URL(request.url).origin) return new Response('Forbidden Origin', { status: 403 });
   if (request.method === 'GET') return new Response('SSE is not supported. Use POST.', { status: 405 });
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
-  const owner = tokenId(env('ADLOCALIZER_MCP_TOKEN'));
+  const owner = bot || tokenId(env('ADLOCALIZER_MCP_TOKEN'));
   const envelope = await request.clone().json().catch(() => null);
-  if (envelope?.method === 'tools/call') {
+  if (!bot && envelope?.method === 'tools/call') {
     const name = String(envelope.params?.name || 'unknown');
     try { await enforceRate(owner, name); }
     catch (error) {
@@ -80,7 +86,7 @@ export default async (request: Request) => {
     }
   }
   let audited = false;
-  const server = createServer(owner, request.url, () => { audited = true; });
+  const server = createServer(owner, request.url, () => { audited = true; }, Boolean(bot));
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);
   const response = await transport.handleRequest(request);

@@ -437,6 +437,7 @@ export default function App() {
             <span className="text-[10px] text-gray-400 font-semibold tracking-wide">v3.4</span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <a href="/bot.html" className="px-3 py-2 rounded-full border border-black/20 text-[10px] font-bold uppercase tracking-widest">Bot API</a>
             <button onClick={() => setShowLibrary(true)} className="flex items-center gap-2 px-3 py-2 rounded-full border border-black/20 text-[10px] font-bold uppercase tracking-widest hover:bg-white" title="Translation Library">
               <BookOpen className="w-3.5 h-3.5" />
               {translationMemory.length}

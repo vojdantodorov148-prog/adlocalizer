@@ -105,3 +105,11 @@ test('30-day asset link is scoped, signed and expires', async () => {
   assert.equal(verifyAsset(path + 'x', expires, sig), false);
   assert.equal(verifyAsset(path, '1000000000', sig), false);
 });
+
+test('bot API denies anonymous key management and bot operations', async () => {
+  const { default: api } = await import('../netlify/functions/bot-api.mts');
+  for (const path of ['keys', 'generate', 'localize', 'jobs/gen_example', 'options']) {
+    const response = await api(new Request('https://adlocalizer.netlify.app/api/v1/' + path, { method: 'POST' }));
+    assert.equal(response.status, 401);
+  }
+});

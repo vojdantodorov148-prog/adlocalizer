@@ -1,0 +1,46 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect your bot · Ad Localizer</title>
+<style>body{font:16px/1.55 system-ui;color:#181818;max-width:700px;padding:24px;margin:0 auto}h1,h2{line-height:1.2}label,input,output{display:block}input,button{font:inherit;padding:8px}input{box-sizing:border-box;width:100%;margin:4px 0 10px}button{cursor:pointer}pre{padding:12px;background:#f4f4f4;overflow:auto}section{border-top:1px solid #ccc;margin-top:24px}output{overflow-wrap:anywhere}</style>
+<a href="/">← Ad Localizer</a><h1>Connect your bot</h1>
+<p>In your bot’s remote MCP settings, choose Streamable HTTP and paste this endpoint. Select Bearer authentication and paste your bot API key.</p>
+<pre id="endpoint"></pre><p>Ask your bot to use <code>generate_image</code> for a new image or <code>start_localization</code> for a source image and target market. Use <code>get_job</code> until the images are ready.</p>
+<section><h2>Owner · Manage bot keys</h2><label>Owner token (ADLOCALIZER_MCP_TOKEN)<input id="owner" type="password" autocomplete="off"></label>
+<button id="create">Create bot key</button><output id="message" role="status"></output>
+<div id="created" hidden><label>Bot API key · copy now<input readonly type="password" id="secret"></label><button id="copy">Copy key</button></div>
+<p>Save the key ID to revoke access later.</p><label>Key ID<input id="keyId"></label><button id="revoke">Revoke this key</button></section>
+<section><h2>HTTP API</h2><p>Send <code>Authorization: Bearer YOUR_BOT_KEY</code> with every request. For POST requests use <code>Content-Type: application/json</code>.</p>
+<pre>POST /api/v1/generate
+{"prompt":"A ceramic cup beside a sunlit window"}
+
+POST /api/v1/localize
+{"image_urls":["https://your-site.com/ad.png"],
+ "target_languages":["Greece"],"model":"grok"}
+
+GET /api/v1/options
+GET /api/v1/jobs/{job_id}</pre>
+<p>Both POST endpoints return a job ID. Poll every five seconds until done or failed. Read images from results[].url. For localization, the options endpoint lists supported markets. Reuse an idempotency_key when retrying a localization request.</p>
+<p>Bot keys have no daily or per-minute app quota. For localization, send up to 20 sources and 100 source × market results per job. Submit additional jobs for larger batches. Provider credits, provider throughput and hosting limits apply.</p></section>
+<script>
+const el = id => document.getElementById(id);
+el('endpoint').textContent = location.origin + '/mcp';
+async function manage(create) {
+  const id = el('keyId').value.trim();
+  if (!create && (!/^[a-f0-9]{32}$/.test(id) || !confirm('Revoke access for key ' + id + '?'))) return;
+  const token = el('owner').value.trim();
+  if (!token) { el('message').textContent = 'Enter the owner token first.'; return; }
+  el('create').disabled = el('revoke').disabled = true;
+  try {
+    const response = await fetch('/api/v1/keys' + (create ? '' : '/' + id), {method:create?'POST':'DELETE',headers:{Authorization:'Bearer '+token}});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error);
+    el('created').hidden = !create;
+    el('secret').value = data.key || '';
+    el('keyId').value = data.id || '';
+    el('message').textContent = create ? 'Key created. Copy it into your bot’s secret settings.' : 'Key revoked.';
+    el('owner').value = '';
+  } catch (error) { el('message').textContent = error.message; }
+  finally { el('create').disabled = el('revoke').disabled = false; }
+}
+el('create').onclick = () => manage(true);
+el('revoke').onclick = () => manage(false);
+el('copy').onclick = async () => {try {await navigator.clipboard.writeText(el('secret').value);el('message').textContent='Key copied.';}catch {el('secret').type='text';el('secret').select();}};
+</script></html>
