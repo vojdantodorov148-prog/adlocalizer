@@ -33,7 +33,7 @@ test('MCP Streamable HTTP initializes and lists all seven tools', async () => {
   assert.equal((await initialized.json()).result.serverInfo.name, 'ad-localizer');
   const listed = await call(2, 'tools/list', {});
   assert.deepEqual((await listed.json()).result.tools.map((tool: { name: string }) => tool.name).sort(), [
-    'get_job', 'get_job_zip', 'list_jobs', 'list_languages', 'list_options', 'start_localization', 'upload_image',
+    'get_job', 'get_job_zip', 'list_jobs', 'list_languages', 'list_options', 'localize_creator_output', 'start_localization', 'upload_image',
   ].sort());
 });
 

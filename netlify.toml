@@ -8,3 +8,6 @@
 
 [build.environment]
   NODE_VERSION = "22"
+
+[functions."mcp"]
+  included_files = ["node_modules/@resvg/resvg-wasm/index_bg.wasm"]

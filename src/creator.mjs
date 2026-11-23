@@ -33,7 +33,7 @@ async function select(image){
   const v=reset();output=image.id;
   history.replaceState(null,'','?'+new URLSearchParams({job_id:job,output_id:output}));
   el('original').src=image.url;el('review').hidden=false;
-  await readPackage(v,'get');
+  await readPackage(v,params.get('prepare')==='1' && params.get('output_id')===output?'prepare':'get');
 }
 async function readPackage(v,action){
   el('prepare').hidden=true;notice('Се вчитува пакетот…');
@@ -50,6 +50,7 @@ async function readPackage(v,action){
     el('original').src=m.assets.original;el('preview').src=m.assets.preview;el('base').src=m.assets.base;
     const [loaded]=await Promise.all([loadArt(m),el('original').decode(),el('preview').decode()]);if(v!==version)return;
     manifest=m;art=loaded;storage='creator:'+JSON.stringify([job,output,m.source_sha256]);draft=JSON.parse(localStorage.getItem(storage)||'{"approved":false,"texts":{}}');
+    draft.approved=data.approved===true;
     el('notes').textContent=[...(m.reasons||[]),...m.blocks.filter(b=>!b.editable).map(b=>b.text+' — '+b.reason)].join('\n');
     el('approval').hidden=false;el('approve').disabled=draft.approved;notice(draft.approved?'Реконструкцијата е одобрена.':'Спореди ги двете слики пред да одобриш.');
     if(draft.approved)await edit();return;
@@ -77,7 +78,7 @@ async function draw(){
 }
 async function safe(fn){const before=version;try{await fn();}catch(e){if(version<=before+1)notice(e.message);}}
 el('lookup').onsubmit=e=>{e.preventDefault();const p=new URLSearchParams(location.search);safe(()=>openJob(el('job').value.trim()===p.get('job_id')?p.get('output_id'):null));};
-el('approve').onclick=()=>safe(async()=>{draft.approved=true;persist();el('approve').disabled=true;notice('Реконструкцијата е одобрена.');await edit();});
+el('approve').onclick=()=>safe(async()=>{const v=version;await call('approve',{source_sha256:manifest.source_sha256});if(v!==version)return;draft.approved=true;persist();el('approve').disabled=true;notice('Реконструкцијата е одобрена.');await edit();});
 el('prepare').onclick=()=>safe(()=>readPackage(++version,'prepare'));
 el('refresh').onclick=()=>safe(()=>openJob(output));
 el('market').onchange=()=>safe(edit);

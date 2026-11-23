@@ -7,6 +7,7 @@ import { createJob, languageOptions, listJobs, options, publicJob, zipJob } from
 import { dispatchJob } from '../lib/dispatch';
 
 import { botOwner, generate, generationStatus } from '../lib/bot';
+import {localizeCreator} from '../lib/creator-export';
 
 function json(data: unknown) { return { content: [{ type: 'text' as const, text: JSON.stringify(data) }], structuredContent: data as Record<string, unknown> }; }
 
@@ -49,6 +50,11 @@ function createServer(owner: string, origin: string, markAudited: () => void, bo
     },
   }, wrap('start_localization', async (args) => ({ job_id: await createJob(owner, args, (id) => dispatchJob(id, origin)), status: 'queued' })));
 
+  server.registerTool('localize_creator_output',{
+    description:'Low-cost Ad Creator translation. Give job_id + output_id to prepare or retrieve editable English lines. Show review_url for one-time human approval. Translate the returned lines yourself and call again with source_sha256 and translations for up to four markets. Returns PNG URLs without image or translation model calls. Repeat while queued/running.',
+    inputSchema:{job_id:z.string().regex(/^[\w-]{1,200}$/),output_id:z.string().regex(/^[\w-]{1,200}$/),
+      source_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional(),translations:z.array(z.object({market:z.string(),texts:z.record(z.string(),z.string().min(1).max(2000))})).max(4).optional()}
+  },wrap('localize_creator_output',async ({job_id,output_id,translations,source_sha256})=>localizeCreator(owner,origin,job_id,output_id,translations||[],source_sha256)));
   if (bot) server.registerTool('open_creator_creative', {
     description: 'Open a completed Ad Creator PRO creative for operator review and SVG localization. Supply output_id for an exact creative or omit it to show variants.',
     inputSchema: { job_id:z.string().regex(/^[\w-]{1,200}$/), output_id:z.string().regex(/^[\w-]{1,200}$/).optional() },

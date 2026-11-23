@@ -1,5 +1,6 @@
 import { env, validateUrl } from './core';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+export const approvalKey=(job:string,output:string,hash:string)=>`creator-review/v1/${job}/${output}/${hash}`;
 
 export function validId(value: unknown): value is string {
   return typeof value === 'string' && /^[a-zA-Z0-9_-]{1,200}$/.test(value);
