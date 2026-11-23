@@ -1,12 +1,14 @@
-import {createHash} from 'node:crypto';
+import {createHash, randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {initWasm, Resvg} from '@resvg/resvg-wasm';
 import opentype from 'opentype.js';
 import {drawLayer} from '../../src/localizerSvg.mjs';
-import {assetStore, saveAsset, signedUrl, stateStore} from './core';
+import {assetStore, env, saveAsset, signedUrl, stateStore, updateJSON} from './core';
 import {approvalKey,producer} from './packages';
 import {COUNTRIES} from '../../src/options';
+
+import {translateLayers} from '../../src/kie';
 
 type Translation={market:string;texts:Record<string,string>};
 type Layer={id:string;text:string;editable:boolean;z:number};
@@ -16,7 +18,7 @@ async function bytes(url:string){
   if(!r.ok)throw Error('Source asset unavailable. Retry to refresh the package.');
   return Buffer.from(await r.arrayBuffer());
 }
-export async function localizeCreator(owner:string,origin:string,job_id:string,output_id:string,translations:Translation[],sourceHash?:string){
+export async function localizeCreator(owner:string,origin:string,job_id:string,output_id:string,translations:Translation[],sourceHash?:string, market?:string){
   const ids={job_id,output_id};
   const review=new URL('/creator.html',origin);
   review.search=new URLSearchParams({...ids,prepare:'1'}).toString();
@@ -33,8 +35,36 @@ export async function localizeCreator(owner:string,origin:string,job_id:string,o
   const info={review_url:review.href,source_sha256:sha,blocks:layers.map(({id,text})=>({id,text}))};
   if(!layers.length)return {status:'manual_edit_required',...info};
   if(!await stateStore().get(approvalKey(job_id,output_id,sha)))return {status:'needs_review',...info};
-  if(!translations.length)return {status:'awaiting_translations',...info};
-  if(sourceHash!==sha)throw Error('source_sha256: read the approved package before export');
+  if(market && translations.length) throw Error('Choose market for automatic translation or translations for manual text.');
+  if(sourceHash !== undefined && sourceHash !== sha) throw Error('source_sha256: package has changed');
+  if(market) {
+    if(!COUNTRIES.includes(market)) throw Error('market: use a market returned by list_languages');
+    const key = 'creator-translations/v1/'+createHash('sha256').update(JSON.stringify([owner,job_id,output_id,sha,market,info.blocks])).digest('hex');
+    type Entry = {texts?:Record<string,string>; lease?:string; until?:number};
+    const store = stateStore();
+    const lease = randomUUID();
+    const cached = await store.get(key,{type:'json'}) as Entry|null;
+    const entry = cached?.texts ? cached : await updateJSON<Entry>(store,key,current => {
+      if(current?.texts || (current?.until ?? 0)>Date.now()) return current!;
+      return {lease,until:Date.now()+120000};
+    });
+    let texts = entry.texts;
+    if(!texts) {
+      if(entry.lease!==lease) return {status:'translating',market,...info};
+      try {
+        texts = await translateLayers(info.blocks,market,env('KIE_API_KEY'));
+        const saved = await updateJSON<Entry>(store,key,current=>current?.lease===lease?{texts}:current || {});
+        if(!saved.texts) return {status:'translating',market,...info};
+        texts=saved.texts;
+      } catch(error) {
+        await updateJSON<Entry>(store,key,current=>current?.lease===lease?{}:current || {});
+        throw error;
+      }
+    }
+    translations=[{market,texts}];
+  }
+  if(!translations.length)return {status:'awaiting_translations',next:'Call again with market for Ad Localizer automatic translation.',...info};
+  if(!market && sourceHash!==sha)throw Error('source_sha256: read the approved package before export');
   let art:Promise<[Buffer,opentype.Font]>|undefined;
   const results=[];
   for(const {market,texts} of translations){
@@ -53,8 +83,8 @@ export async function localizeCreator(owner:string,origin:string,job_id:string,o
         const renderer=new Resvg('<svg xmlns="http://www.w3.org/2000/svg" '+size+'><image '+size+' href="data:image/png;base64,'+base.toString('base64')+'"/>'+paths+'</svg>');
         try{const image=renderer.render();try{await saveAsset(path,Buffer.from(image.asPng()),'image/png');}finally{image.free();}}finally{renderer.free();}
       }
-      results.push({market,url:signedUrl(path)});
-    }catch(e){results.push({market,error:e instanceof Error?e.message:'Export failed'});}
+      results.push({market,texts,url:signedUrl(path)});
+    }catch(e){results.push({market,texts,error:e instanceof Error?e.message:'Export failed'});}
   }
   return {status:results.some(r=>r.error)?'needs_attention':'done',results,...info};
 }
