@@ -10,6 +10,7 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig(() => {
   return {
+    build: { rollupOptions: { input: ['index.html','creator.html'] } },
     server: {
       port: 3000,
       host: '0.0.0.0',

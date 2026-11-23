@@ -49,6 +49,15 @@ function createServer(owner: string, origin: string, markAudited: () => void, bo
     },
   }, wrap('start_localization', async (args) => ({ job_id: await createJob(owner, args, (id) => dispatchJob(id, origin)), status: 'queued' })));
 
+  if (bot) server.registerTool('open_creator_creative', {
+    description: 'Open a completed Ad Creator PRO creative for operator review and SVG localization. Supply output_id for an exact creative or omit it to show variants.',
+    inputSchema: { job_id:z.string().regex(/^[\w-]{1,200}$/), output_id:z.string().regex(/^[\w-]{1,200}$/).optional() },
+  }, wrap('open_creator_creative', async ({job_id,output_id}) => {
+    const link = new URL('/creator.html',origin);
+    link.searchParams.set('job_id',String(job_id));
+    if (output_id) link.searchParams.set('output_id',String(output_id));
+    return {review_url:link.href};
+  }));
   if (bot) server.registerTool('generate_image', { description: 'Generate a new square image from a prompt. Poll get_job for result URLs.', inputSchema: { prompt: z.string().min(1) } },
     wrap('generate_image', async ({ prompt }) => generate(owner, String(prompt))));
   server.registerTool('get_job', { description: 'Fetch job status, progress, errors and available image URLs.', inputSchema: { job_id: z.string() } },
